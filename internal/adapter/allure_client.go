@@ -34,16 +34,6 @@ type AllureClient struct {
 	mu           sync.Mutex // Добавляем мьютекс
 }
 
-// SetClient позволяет заменить HTTP-клиент (используется для тестирования)
-func (a *AllureClient) SetClient(c *resty.Client) {
-	a.client = c
-}
-
-// SetHTTPTransport позволяет заменить HTTP-клиент (только для тестов)
-func (a *AllureClient) SetHTTPTransport(rt http.RoundTripper) {
-	a.client.SetTransport(rt)
-}
-
 // NewAllureClient - создание клиента API Allure
 func NewAllureClient(cfg *config.Config) *AllureClient {
 	client := resty.New().

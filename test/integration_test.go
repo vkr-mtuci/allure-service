@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,4 +147,39 @@ func TestMockDownloadPDFReport(t *testing.T) {
 
 	// ✅ Проверяем, что мок был вызван
 	mockClient.AssertExpectations(t)
+}
+
+func TestFullPDFFlow(t *testing.T) {
+	// Инициализация приложения
+	app := fiber.New()
+	mockClient := new(MockAllureClient)
+	service := service.NewAllureService(mockClient)
+	handler := handler.NewAllureHandler(service)
+
+	app.Post("/export/pdf/:id", handler.GeneratePDFReport)
+	app.Get("/export/pdf/download/:id", handler.DownloadPDFReport)
+
+	// Мокаем успешный поток
+	mockClient.On("GeneratePDFReport", mock.Anything, int64(123), "Test Run").
+		Return(&adapter.PDFReport{ID: 456}, nil)
+
+	mockClient.On("GetPDFDownloadLink", "456").
+		Return("http://mocked.url/download/456")
+
+	mockClient.On("DownloadPDFReport", mock.Anything, "456").
+		Return([]byte("PDF content"), "report.pdf", nil)
+
+	// Шаг 1: Генерация отчета
+	reqGen := httptest.NewRequest("POST", "/export/pdf/123", strings.NewReader(
+		`{"launchId":123,"name":"Test Run"}`,
+	))
+	reqGen.Header.Set("Content-Type", "application/json")
+	respGen, _ := app.Test(reqGen)
+	assert.Equal(t, http.StatusOK, respGen.StatusCode)
+
+	// Шаг 2: Скачивание отчета
+	reqDown := httptest.NewRequest("GET", "/export/pdf/download/456", nil)
+	respDown, _ := app.Test(reqDown)
+	assert.Equal(t, http.StatusOK, respDown.StatusCode)
+	assert.Equal(t, "application/pdf", respDown.Header.Get("Content-Type"))
 }

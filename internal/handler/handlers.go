@@ -88,8 +88,17 @@ func (h *AllureHandler) GeneratePDFReport(c *fiber.Ctx) error {
 	report, err := h.service.GeneratePDFReport(request.LaunchID, request.Name)
 	if err != nil {
 		log.Error().Err(err).Msg("❌ Ошибка генерации PDF-отчета")
+
+		// Если ошибка связана с валидацией данных, возвращаем 400
+		if strings.Contains(err.Error(), "invalid input") {
+			return c.Status(http.StatusBadRequest).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		}
+
+		// В остальных случаях - 500
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
-			"error": err.Error(),
+			"error": "Ошибка сервера при генерации отчета",
 		})
 	}
 

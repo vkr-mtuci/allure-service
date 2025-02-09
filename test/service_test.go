@@ -117,3 +117,56 @@ func TestDownloadPDFReport_Error(t *testing.T) {
 	assert.Nil(t, data)
 	assert.Equal(t, "", name)
 }
+
+func TestGeneratePDFReport_InvalidParameters(t *testing.T) {
+	mockClient := new(MockAllureClient)
+	service := service.NewAllureService(mockClient)
+
+	// Добавляем мокирование для вызовов с некорректными параметрами
+	mockClient.On("GeneratePDFReport", mock.Anything, int64(0), "Test").
+		Return(nil, errors.New("invalid launch ID"))
+
+	mockClient.On("GeneratePDFReport", mock.Anything, int64(123), "").
+		Return(nil, errors.New("empty launch name"))
+
+	// Тест с нулевым LaunchID
+	_, err := service.GeneratePDFReport(0, "Test")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid launch ID")
+
+	// Тест с пустым именем
+	_, err = service.GeneratePDFReport(123, "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty launch name")
+
+	// Проверяем, что мокированные вызовы действительно произошли
+	mockClient.AssertExpectations(t)
+}
+
+func TestDownloadPDFReport_EdgeCases(t *testing.T) {
+	mockClient := new(MockAllureClient)
+	service := service.NewAllureService(mockClient)
+
+	// Добавляем мокирование вызова с пустым reportID
+	mockClient.On("DownloadPDFReport", mock.Anything, "").Return(
+		nil, "", errors.New("empty report ID"),
+	)
+
+	// Добавляем мокирование вызова с неверным форматом ID
+	mockClient.On("DownloadPDFReport", mock.Anything, "invalid").Return(
+		nil, "", errors.New("invalid report ID"),
+	)
+
+	// Тест с пустым reportID
+	_, _, err := service.DownloadPDFReport("")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "empty report ID")
+
+	// Тест с неверным форматом ID
+	_, _, err = service.DownloadPDFReport("invalid")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid report ID")
+
+	// Проверяем, что моки были вызваны
+	mockClient.AssertExpectations(t)
+}

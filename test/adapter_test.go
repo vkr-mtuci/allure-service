@@ -2,7 +2,12 @@ package test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,4 +120,169 @@ func TestAuthenticate_StatusCodeError(t *testing.T) {
 
 	// 📌 **Проверяем вызов**
 	mockClient.AssertExpectations(t)
+}
+
+// Unit-тесты для AllureClient
+func TestGetLaunches_RealClient(t *testing.T) {
+	// Фейковый HTTP-сервер, который эмулирует Allure API
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/uaa/oauth/token" {
+			// Эмулируем выдачу токена
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token": "mocked_token", "expires_in": 3600}`))
+			return
+		}
+
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/launch") {
+			// Эмулируем ответ от Allure API
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"content": []adapter.Launch{
+					{ID: 1, Name: "Launch 1", CreatedDate: time.Now().Add(-1 * time.Hour).UnixMilli()},
+					{ID: 2, Name: "Launch 2", CreatedDate: time.Now().Add(1 * time.Hour).UnixMilli()},
+				},
+			})
+			return
+		}
+
+		// Если запрос не распознан, возвращаем 404
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close() // Закрываем сервер после теста
+
+	// Настроим реальный клиент, но направим его на фейковый сервер
+	cfg := &config.Config{
+		AllureBaseURL:   mockServer.URL,
+		AllureAPIURL:    "/api/",
+		AllureUserToken: "fake-token", // Чтобы `Authenticate` работал
+	}
+	client := adapter.NewAllureClient(cfg)
+
+	// Запрашиваем запуски через реальный `AllureClient`
+	launches, err := client.GetLaunches(context.Background())
+
+	// Проверяем, что нет ошибок
+	assert.NoError(t, err)
+	assert.Len(t, launches, 2)
+	assert.Equal(t, int64(1), launches[0].ID)
+	assert.Equal(t, "Launch 1", launches[0].Name)
+}
+
+func TestGeneratePDFReport_RealClient(t *testing.T) {
+	// Фейковый HTTP-сервер, который эмулирует Allure API
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/uaa/oauth/token" {
+			// Эмулируем выдачу токена
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token": "mocked_token", "expires_in": 3600}`))
+			return
+		}
+
+		if r.Method == http.MethodPost && r.URL.Path == "/api/export/launch/pdf" {
+			// Эмулируем успешную генерацию PDF
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(adapter.PDFReport{
+				ID:     456,
+				Name:   "Test Run",
+				Type:   "pdf",
+				Status: "generated",
+			})
+			return
+		}
+
+		// Если запрос не распознан, возвращаем 404
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close() // Закрываем сервер после теста
+
+	// Настроим реальный клиент, но направим его на фейковый сервер
+	cfg := &config.Config{
+		AllureBaseURL:   mockServer.URL,
+		AllureAPIURL:    "/api/",
+		AllureUserToken: "fake-token",
+	}
+	client := adapter.NewAllureClient(cfg)
+
+	// Запрашиваем генерацию PDF через реальный `AllureClient`
+	report, err := client.GeneratePDFReport(context.Background(), 123, "Test Run")
+
+	// Проверяем, что нет ошибок
+	assert.NoError(t, err)
+	assert.NotNil(t, report)
+	assert.Equal(t, int64(456), report.ID)
+	assert.Equal(t, "Test Run", report.Name)
+}
+
+func TestGetPDFDownloadLink_RealClient(t *testing.T) {
+	// Фейковый HTTP-сервер, который эмулирует Allure API
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Проверяем, что клиент делает GET-запрос на скачивание
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/export/download/") {
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			return
+		}
+
+		// Если запрос не распознан, возвращаем 404
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close() // Закрываем сервер после теста
+
+	// Настроим реальный клиент, но направим его на фейковый сервер
+	cfg := &config.Config{
+		AllureBaseURL:   mockServer.URL,
+		AllureAPIURL:    "/api/",
+		AllureUserToken: "fake-token",
+	}
+	client := adapter.NewAllureClient(cfg)
+
+	// Вызываем метод `GetPDFDownloadLink`
+	link := client.GetPDFDownloadLink("456")
+
+	// Проверяем, что ссылка корректная
+	expectedURL := fmt.Sprintf("%s/api/export/download/456", mockServer.URL)
+	assert.Equal(t, expectedURL, link)
+}
+
+func TestDownloadPDFReport_RealClient(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/uaa/oauth/token" {
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token": "mocked_token", "expires_in": 3600}`))
+			return
+		}
+
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/export/download/") {
+			if r.Header.Get("Authorization") != "Bearer mocked_token" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Disposition", "attachment; filename=allure-report-456.pdf")
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write([]byte("PDF content"))
+			return
+		}
+
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockServer.Close()
+
+	cfg := &config.Config{
+		AllureBaseURL:   mockServer.URL,
+		AllureAPIURL:    "/api/",
+		AllureUserToken: "fake-token",
+	}
+	client := adapter.NewAllureClient(cfg)
+
+	data, filename, err := client.DownloadPDFReport(context.Background(), "456")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "allure-report-456.pdf", filename) // ✅ Исправлено имя файла
+	assert.Equal(t, "PDF content", string(data))
 }
